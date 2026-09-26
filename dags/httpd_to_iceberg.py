@@ -1,6 +1,7 @@
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator   
 
 import pendulum
 import pandas as pd
@@ -8,20 +9,13 @@ import re
 import io
 
 
-# --------------------------------------------------
-# Configuration
-# --------------------------------------------------
-
-BUCKET = "my-portfolio-bucket-6762"
+BUCKET = "my-portfolio-bucket-6762-us"
 AWS_CONN_ID = "aws_default"
 
 RAW_PREFIX = "raw/httpd/"
+STAGING_PREFIX = "staging/httpd/"
 BRONZE_PREFIX = "bronze/httpd/"
 
-
-# --------------------------------------------------
-# Regex patterns
-# --------------------------------------------------
 
 ACCESS_PATTERN = re.compile(
     r'(?P<ip_address>\S+) '
@@ -41,13 +35,16 @@ ERROR_PATTERN = re.compile(
     r'\[(?P<pid>[^\]]+)\] '
     r'(?P<message>.*)'
 )
-# --------------------------------------------------
-# Read S3 file
-# --------------------------------------------------
+
+
+def get_s3():
+    return S3Hook(
+        aws_conn_id=AWS_CONN_ID,
+        region_name="us-east-1"
+    )
 
 
 def read_s3_text(s3, key):
-
     obj = s3.get_key(
         key=key,
         bucket_name=BUCKET
@@ -60,12 +57,7 @@ def read_s3_text(s3, key):
     )
 
 
-# --------------------------------------------------
-# Upload DataFrame as Parquet
-# --------------------------------------------------
-
 def upload_parquet(s3, df, key):
-
     buffer = io.BytesIO()
 
     df.to_parquet(
@@ -86,182 +78,221 @@ def upload_parquet(s3, df, key):
     print(f"Uploaded: s3://{BUCKET}/{key}")
 
 
-# --------------------------------------------------
-# Process access log
-# --------------------------------------------------
+# ==================================================
+# TASK 1: Read + clean
+# ==================================================
 
-def process_access_file(s3, key):
+def read_and_clean_files(**context):
 
-    print(f"Processing access log: {key}")
+    s3 = get_s3()
 
-    text = read_s3_text(s3, key)
-
-    rows = []
-
-    for line in text.splitlines():
-
-        match = ACCESS_PATTERN.match(line)
-
-        if not match:
-            continue
-
-        row = match.groupdict()
-
-        row["status_code"] = int(
-            row["status_code"]
-        )
-
-        row["response_size"] = (
-            int(row["response_size"])
-            if row["response_size"].isdigit()
-            else 0
-        )
-
-        rows.append(row)
-
-    if not rows:
-        print(f"No valid rows found in {key}")
-        return
-
-    df = pd.DataFrame(rows)
-
-    df["timestamp"] = pd.to_datetime(
-        df["timestamp"],
-        format="%d/%b/%Y:%H:%M:%S %z",
-        errors="coerce"
+    # Use Airflow run date
+    run_date = context["data_interval_start"].in_timezone(
+        "Asia/Riyadh"
     )
 
-    df = df.dropna(
-        subset=["timestamp"]
-    )
+    date_prefix = run_date.format("YYYY/MM/DD")
 
-    df = df.drop_duplicates()
-
-    filename = key.split("/")[-1]
-
-    bronze_key = (
-        f"{BRONZE_PREFIX}"
-        f"{filename}.parquet"
-    )
-
-    upload_parquet(
-        s3,
-        df,
-        bronze_key
+    raw_date_prefix = (
+        f"{RAW_PREFIX}"
+        f"{date_prefix}/"
     )
 
     print(
-        f"{filename}: "
-        f"{len(df)} rows written"
-    )
-
-
-# --------------------------------------------------
-# Process error log
-# --------------------------------------------------
-
-def process_error_file(s3, key):
-
-    print(f"Processing error log: {key}")
-
-    text = read_s3_text(s3, key)
-
-    rows = []
-
-    for line in text.splitlines():
-
-        match = ERROR_PATTERN.match(line)
-
-        if not match:
-            continue
-
-        row = match.groupdict()
-
-        rows.append(row)
-
-    if not rows:
-        print(f"No valid rows found in {key}")
-        return
-
-    df = pd.DataFrame(rows)
-
-    df["timestamp"] = pd.to_datetime(
-        df["timestamp"],
-        errors="coerce"
-    )
-
-    df = df.drop_duplicates()
-
-    filename = key.split("/")[-1]
-
-    bronze_key = (
-        f"{BRONZE_PREFIX}"
-        f"{filename}.parquet"
-    )
-
-    upload_parquet(
-        s3,
-        df,
-        bronze_key
-    )
-
-    print(
-        f"{filename}: "
-        f"{len(df)} rows written"
-    )
-
-
-# --------------------------------------------------
-# Main Airflow task
-# --------------------------------------------------
-
-def raw_to_bronze():
-
-    s3 = S3Hook(
-        aws_conn_id=AWS_CONN_ID,
-        region_name="us-east-1"
+        f"Reading from: "
+        f"s3://{BUCKET}/{raw_date_prefix}"
     )
 
     keys = s3.list_keys(
         bucket_name=BUCKET,
-        prefix=RAW_PREFIX
+        prefix=raw_date_prefix
     )
 
     if not keys:
         raise ValueError(
             f"No files found under "
-            f"s3://{BUCKET}/{RAW_PREFIX}"
+            f"s3://{BUCKET}/{raw_date_prefix}"
         )
+
+    cleaned_keys = []
 
     for key in keys:
 
         filename = key.split("/")[-1]
 
+        if not (
+            filename.startswith("access_log")
+            or filename.startswith("error_log")
+        ):
+            continue
+
+        print(f"Reading and cleaning: {filename}")
+
+        text = read_s3_text(
+            s3,
+            key
+        )
+
+        rows = []
+
+        # ------------------------------------------
+        # Access logs
+        # ------------------------------------------
+
         if filename.startswith("access_log"):
 
-            process_access_file(
-                s3,
-                key
+            for line in text.splitlines():
+
+                match = ACCESS_PATTERN.match(line)
+
+                if not match:
+                    continue
+
+                row = match.groupdict()
+
+                row["status_code"] = int(
+                    row["status_code"]
+                )
+
+                row["response_size"] = (
+                    int(row["response_size"])
+                    if row["response_size"].isdigit()
+                    else 0
+                )
+
+                rows.append(row)
+
+            if not rows:
+                print(
+                    f"No valid rows in {filename}"
+                )
+                continue
+
+            df = pd.DataFrame(rows)
+
+            df["timestamp"] = pd.to_datetime(
+                df["timestamp"],
+                format="%d/%b/%Y:%H:%M:%S %z",
+                errors="coerce"
             )
+
+            df = df.dropna(
+                subset=["timestamp"]
+            )
+
+            df = df.drop_duplicates()
+
+
+        # ------------------------------------------
+        # Error logs
+        # ------------------------------------------
 
         elif filename.startswith("error_log"):
 
-            process_error_file(
-                s3,
-                key
+            for line in text.splitlines():
+
+                match = ERROR_PATTERN.match(line)
+
+                if not match:
+                    continue
+
+                rows.append(
+                    match.groupdict()
+                )
+
+            if not rows:
+                print(
+                    f"No valid rows in {filename}"
+                )
+                continue
+
+            df = pd.DataFrame(rows)
+
+            df["timestamp"] = pd.to_datetime(
+                df["timestamp"],
+                errors="coerce"
             )
 
-        else:
-
-            print(
-                f"Skipping unknown file: "
-                f"{filename}"
+            df = df.dropna(
+                subset=["timestamp"]
             )
 
+            df = df.drop_duplicates()
 
-# --------------------------------------------------
-# DAG
-# --------------------------------------------------
+
+        # ------------------------------------------
+        # Save cleaned file temporarily
+        # ------------------------------------------
+
+        staging_key = (
+            f"{STAGING_PREFIX}"
+            f"{date_prefix}/"
+            f"{filename}.parquet"
+        )
+
+        upload_parquet(
+            s3,
+            df,
+            staging_key
+        )
+
+        cleaned_keys.append(
+            staging_key
+        )
+
+        print(
+            f"{filename}: "
+            f"{len(df)} cleaned rows"
+        )
+
+    if not cleaned_keys:
+        raise ValueError(
+            "No files were successfully cleaned"
+        )
+
+    return cleaned_keys
+
+# ==================================================
+# TASK 2: Write to bronze
+# ==================================================
+
+def write_to_bronze(ti):
+
+    s3 = get_s3()
+
+    staging_keys = ti.xcom_pull(
+        task_ids="read_and_clean_files"
+    )
+
+    if not staging_keys:
+        raise ValueError(
+            "No cleaned files found"
+        )
+
+    for staging_key in staging_keys:
+
+        filename = staging_key.split("/")[-1]
+
+        folder_name = filename.replace(".parquet", "")
+
+        bronze_key = (
+            f"{BRONZE_PREFIX}"
+            f"{folder_name}/"
+            f"{filename}"
+        )
+
+        s3.copy_object(
+            source_bucket_key=staging_key,
+            dest_bucket_key=bronze_key,
+            source_bucket_name=BUCKET,
+            dest_bucket_name=BUCKET
+        )
+
+        print(
+            f"Written: "
+            f"s3://{BUCKET}/{bronze_key}"
+        )
+
 
 with DAG(
 
@@ -286,7 +317,22 @@ with DAG(
 
 ) as dag:
 
-    raw_to_bronze_task = PythonOperator(
-        task_id="raw_to_bronze",
-        python_callable=raw_to_bronze
+
+    read_clean_task = PythonOperator(
+        task_id="read_and_clean_files",
+        python_callable=read_and_clean_files
     )
+
+
+    write_task = PythonOperator(
+        task_id="write_to_bronze",
+        python_callable=write_to_bronze
+    )
+
+    trigger_cleaning = TriggerDagRunOperator(
+        task_id="trigger_cleaning_dag",
+        trigger_dag_id="httpd_bronze_to_silver",
+    )
+
+
+    read_clean_task >> write_task >> trigger_cleaning

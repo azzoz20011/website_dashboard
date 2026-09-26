@@ -6,7 +6,7 @@ from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOpe
 import pendulum
 
 
-BUCKET = "my-portfolio-bucket-6762"
+BUCKET = "my-portfolio-bucket-6762-us"
 AWS_CONN_ID = "aws_default"
 SSH_CONN_ID = "ec2_ssh"
 
@@ -40,7 +40,7 @@ with DAG(
         2026, 9, 1,
         tz="Asia/Riyadh"
     ),
-    schedule="0 2 * * *",
+    schedule="0 1 * * *",
     catchup=False,
 ) as dag:
 
