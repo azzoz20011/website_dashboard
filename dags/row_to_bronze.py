@@ -389,11 +389,7 @@ def write_to_bronze(**context):
     """)
 
     run_query("""
-        DROP TABLE IF EXISTS stedi.tmp_access_log
-    """)
-
-    run_query("""
-        DROP TABLE IF EXISTS stedi.tmp_error_log
+        DROP TABLE IF EXISTS stedi.bronze_locations_log
     """)
 
     # --------------------------------------------------
@@ -425,6 +421,33 @@ def write_to_bronze(**context):
         LOCATION '{error_staging_path}'
     """)
 
+
+    run_query(f"""
+        CREATE TABLE stedi.distinct_ip_addresses (
+            ip_address STRING
+        )
+        LOCATION '{LOCATIONS_ICEBERG}'
+
+    TBLPROPERTIES (
+        'table_type' = 'ICEBERG',
+        'format' = 'parquet'
+    )
+    """)
+
+    run_query(f"""
+        CREATE TABLE stedi.full_ip_addresses (
+            timestamp TIMESTAMP,
+            ip_address STRING
+        )
+        LOCATION '{LOCATIONS_ICEBERG}'
+
+    TBLPROPERTIES (
+        'table_type' = 'ICEBERG',
+        'format' = 'parquet'
+    )
+    """)
+
+    
     # --------------------------------------------------
     # Create Iceberg access table
     # --------------------------------------------------
