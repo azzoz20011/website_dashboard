@@ -5,15 +5,18 @@ from airflow.providers.amazon.aws.hooks.base_aws import AwsBaseHook
 import pendulum
 import time
 
+import pandas as pd
+import geoip2.database
+import ipaddress
 
 # --------------------------------------------------
 # Configuration
 # --------------------------------------------------
 
 AWS_CONN_ID = "aws_default"
-REGION = "eu-north-1"
+REGION = "us-east-1"
 
-BUCKET = "my-portfolio-bucket-6762"
+BUCKET = "my-portfolio-bucket-6762-us"
 
 DATABASE = "stedi"
 
@@ -266,9 +269,22 @@ def load_iceberg_tables():
     # ----------------------------------------------
 
     access_query = f"""
-    INSERT INTO {DATABASE}.access_log
+    MERGE INTO {DATABASE}.access_log AS target
+    USING {DATABASE}.bronze_access_log AS source
 
-    SELECT
+    ON  target.ip_address = source.ip_address
+    AND target.timestamp = source.timestamp
+    AND target.method = source.method
+    AND target.path = source.path
+    AND target.status_code = source.status_code
+
+    WHEN MATCHED THEN
+    UPDATE SET
+        protocol = source.protocol,
+        response_size = source.response_size
+
+    WHEN NOT MATCHED THEN
+    INSERT (
         ip_address,
         timestamp,
         method,
@@ -276,11 +292,20 @@ def load_iceberg_tables():
         protocol,
         status_code,
         response_size
-
-    FROM {DATABASE}.bronze_access_log
+    )
+    VALUES (
+        source.ip_address,
+        source.timestamp,
+        source.method,
+        source.path,
+        source.protocol,
+        source.status_code,
+        source.response_size
+    )
     """
 
     run_query(access_query)
+
 
 
     # ----------------------------------------------
@@ -288,20 +313,91 @@ def load_iceberg_tables():
     # ----------------------------------------------
 
     error_query = f"""
-    INSERT INTO {DATABASE}.error_log
+    MERGE INTO {DATABASE}.error_log AS target
+    USING {DATABASE}.bronze_error_log AS source
 
-    SELECT
+    ON  target.timestamp = source.timestamp
+    AND target.module = source.module
+    AND target.pid = source.pid
+    AND target.message = source.message
+
+    WHEN MATCHED THEN
+    UPDATE SET
+        message = source.message
+
+    WHEN NOT MATCHED THEN
+    INSERT (
         timestamp,
         module,
         pid,
         message
-
-    FROM {DATABASE}.bronze_error_log
+    )
+    VALUES (
+        source.timestamp,
+        source.module,
+        source.pid,
+        source.message
+    )
     """
 
     run_query(error_query)
 
+def enrich_ip_addresses(
+    input_parquet,
+    geoip_db="/path/to/GeoLite2-City.mmdb"
+):
+    df = pd.read_parquet(input_parquet)
 
+    # Keep only unique IP addresses
+    ips = (
+        df[["ip_address"]]
+        .dropna()
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+
+    reader = geoip2.database.Reader(geoip_db)
+
+    def lookup(ip):
+        try:
+            # Validate IP first
+            ipaddress.ip_address(ip)
+
+            response = reader.city(ip)
+
+            return pd.Series({
+                "country": response.country.name,
+                "region": (
+                    response.subdivisions.most_specific.name
+                    if response.subdivisions
+                    else None
+                ),
+                "city": response.city.name,
+                "latitude": response.location.latitude,
+                "longitude": response.location.longitude,
+                "timezone": response.location.time_zone,
+            })
+
+        except Exception:
+            return pd.Series({
+                "country": None,
+                "region": None,
+                "city": None,
+                "latitude": None,
+                "longitude": None,
+                "timezone": None,
+            })
+
+    geo_data = ips["ip_address"].apply(lookup)
+
+    result = pd.concat(
+        [ips, geo_data],
+        axis=1
+    )
+
+    reader.close()
+
+    return result
 # ==================================================
 # DAG
 # ==================================================

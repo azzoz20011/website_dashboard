@@ -40,7 +40,7 @@ with DAG(
         2026, 9, 1,
         tz="Asia/Riyadh"
     ),
-    schedule="0 1 * * *",
+    schedule="0 4 * * *",
     catchup=False,
 ) as dag:
 
@@ -61,10 +61,10 @@ with DAG(
         DATE=$(date +%Y/%m/%d)
 
         aws s3 cp /var/log/httpd/access_log \
-        s3://my-portfolio-bucket-6762/raw/httpd/$DATE/access_log
+        s3://my-portfolio-bucket-6762-us/raw/httpd/$DATE/access_log
 
         aws s3 cp /var/log/httpd/error_log \
-        s3://my-portfolio-bucket-6762/raw/httpd/$DATE/error_log
+        s3://my-portfolio-bucket-6762-us/raw/httpd/$DATE/error_log
         """,
     )
 
