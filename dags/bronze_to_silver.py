@@ -6,8 +6,6 @@ import pendulum
 import time
 
 import pandas as pd
-import geoip2.database
-import ipaddress
 
 # --------------------------------------------------
 # Configuration
@@ -194,7 +192,11 @@ def create_bronze_tables():
 
     run_query(error_query)
 
+    # ----------------------------------------------
+    # locations log
+    # ----------------------------------------------
 
+ 
 # ==================================================
 # TASK 3
 # Create Iceberg tables
@@ -256,7 +258,11 @@ def create_iceberg_tables():
 
     run_query(error_query)
 
+    # ----------------------------------------------
+    # location Iceberg table
+    # ----------------------------------------------
 
+   
 # ==================================================
 # TASK 4
 # Load Bronze -> Iceberg

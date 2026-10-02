@@ -17,6 +17,9 @@ AWS_CONN_ID = "aws_default"
 
 RAW_PREFIX = "raw/httpd/"
 STAGING_PREFIX = "staging/httpd/"
+LOCATION_PREFIX = "staging/location/"
+DISTINCT_PREFIX = "staging/distinct/"
+
 BRONZE_PREFIX = "bronze/httpd/"
 DATABASE = "stedi"
 ATHENA_OUTPUT = (
@@ -422,30 +425,6 @@ def write_to_bronze(**context):
     """)
 
 
-    run_query(f"""
-        CREATE TABLE stedi.distinct_ip_addresses (
-            ip_address STRING
-        )
-        LOCATION '{LOCATIONS_ICEBERG}'
-
-    TBLPROPERTIES (
-        'table_type' = 'ICEBERG',
-        'format' = 'parquet'
-    )
-    """)
-
-    run_query(f"""
-        CREATE TABLE stedi.full_ip_addresses (
-            timestamp TIMESTAMP,
-            ip_address STRING
-        )
-        LOCATION '{LOCATIONS_ICEBERG}'
-
-    TBLPROPERTIES (
-        'table_type' = 'ICEBERG',
-        'format' = 'parquet'
-    )
-    """)
 
     
     # --------------------------------------------------
@@ -522,7 +501,9 @@ def write_to_bronze(**context):
         FROM stedi.tmp_error_log
     """)
 
-    # --------------------------------------------------
+
+
+    #---------------------------------------------------
     # Remove temporary Athena tables
     # --------------------------------------------------
 
