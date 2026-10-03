@@ -455,6 +455,9 @@ with DAG(
         task_id="load_bronze_to_iceberg",
         python_callable=load_iceberg_tables
     )
+    trigger_cleaning = TriggerDagRunOperator(
+        task_id="ip_location_pipeline",
+        trigger_dag_id="httpd_bronze_to_silver",
+    )
 
-
-    create_db >> create_bronze >> create_iceberg >> load_data
+    create_db >> create_bronze >> create_iceberg >> load_data >> trigger_cleaning
