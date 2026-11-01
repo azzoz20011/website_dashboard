@@ -6,7 +6,10 @@ x-airflow-common:
 
   environment:
     &airflow-common-env
+    AIRFLOW__CORE__TEST_CONNECTION: "Enabled"
+    # Airflow 3 task authentication
 
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
     # Executor
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
 
@@ -26,7 +29,6 @@ x-airflow-common:
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: "http://airflow-api-server:8080/execution/"
 
     # Airflow 3 task authentication
-    AIRFLOW__API_AUTH__JWT_SECRET: "replace-this-with-a-long-random-secret"
     # Health check
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
 

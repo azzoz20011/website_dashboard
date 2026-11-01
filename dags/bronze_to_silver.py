@@ -1,6 +1,8 @@
 from airflow.sdk import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.providers.amazon.aws.hooks.base_aws import AwsBaseHook
+from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator   
+
 
 import pendulum
 import time
@@ -457,7 +459,7 @@ with DAG(
     )
     trigger_cleaning = TriggerDagRunOperator(
         task_id="ip_location_pipeline",
-        trigger_dag_id="httpd_bronze_to_silver",
+        trigger_dag_id="ip_location_pipeline",
     )
 
     create_db >> create_bronze >> create_iceberg >> load_data >> trigger_cleaning

@@ -354,6 +354,8 @@ def write_to_bronze(**context):
     )
 
     date_prefix = run_date.format("YYYY/MM/DD")
+ 
+
 
     access_staging_path = (
         f"s3://{BUCKET}/"
@@ -394,7 +396,8 @@ def write_to_bronze(**context):
     run_query("""
         DROP TABLE IF EXISTS stedi.bronze_locations_log
     """)
-
+    run_query("DROP TABLE IF EXISTS stedi.tmp_access_log")
+    run_query("DROP TABLE IF EXISTS stedi.tmp_error_log")
     # --------------------------------------------------
     # Create temporary external tables over Parquet
     # --------------------------------------------------

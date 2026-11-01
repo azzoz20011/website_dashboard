@@ -55,18 +55,20 @@ with DAG(
     )
 
     upload_logs = SSHOperator(
-        task_id="upload_logs_to_s3",
-        ssh_conn_id=SSH_CONN_ID,
-        command="""
+    task_id="upload_logs_to_s3",
+    ssh_conn_id="ec2_ssh",
+    command="""
         DATE=$(date +%Y/%m/%d)
 
         aws s3 cp /var/log/httpd/access_log \
-        s3://my-portfolio-bucket-6762-us/raw/httpd/$DATE/access_log
+            s3://my-portfolio-bucket-6762-us/raw/httpd/$DATE/access_log
 
         aws s3 cp /var/log/httpd/error_log \
-        s3://my-portfolio-bucket-6762-us/raw/httpd/$DATE/error_log
-        """,
-    )
+            s3://my-portfolio-bucket-6762-us/raw/httpd/$DATE/error_log
+    """,
+    conn_timeout=30,
+    cmd_timeout=120,
+)
 
     verify_s3 = PythonOperator(
         task_id="verify_s3_upload",
